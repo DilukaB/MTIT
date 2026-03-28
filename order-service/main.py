@@ -21,11 +21,11 @@ class Order(BaseModel):
     total_price: float
 
 class OrderStatusUpdate(BaseModel):
-    status: str  # pending, processing, shipped, delivered, cancelled
+    status: str
 
 @app.get("/", tags=["Health"])
 def root():
-    return {"service": "Order Service", "status": "running"}
+    return {"service": "Order Service", "status": "running", "port": 8003}
 
 @app.get("/orders", tags=["Orders"])
 def get_all_orders():
@@ -75,13 +75,10 @@ def update_order_status(order_id: int, update: OrderStatusUpdate):
 
 @app.delete("/orders/{order_id}", tags=["Orders"])
 def cancel_order(order_id: int):
-    """Cancel/delete an order"""
+    """Cancel an order"""
     global orders_db
     order = next((o for o in orders_db if o["id"] == order_id), None)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     orders_db = [o for o in orders_db if o["id"] != order_id]
     return {"message": "Order cancelled successfully"}
-
-
- 
