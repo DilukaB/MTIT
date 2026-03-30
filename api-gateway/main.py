@@ -16,11 +16,11 @@ Instead of calling each microservice on different ports, clients call the Gatewa
 
 | Route Prefix             | Forwards To              | Port |
 |--------------------------|--------------------------|------|
-| `/api/products/**`       | Product Service          | 8001 |
-| `/api/customers/**`      | Customer Service         | 8002 |
-| `/api/orders/**`         | Order Service            | 8003 |
-| `/api/payments/**`       | Payment Service          | 8004 |
-| `/api/cart/**`           | Cart Service             | 8005 |
+| `/api/products/**`           | Product Service          | 8001 |
+| `/api/customers/**`          | Customer Service         | 8002 |
+| `/api/orders/**`             | Order Service            | 8003 |
+| `/api/payments/**`           | Payment Service          | 8004 |
+| `/api/notifications/**`      | Notification Service     | 8005 |
     """,
     version="1.0.0",
 )
@@ -35,11 +35,11 @@ app.add_middleware(
 
 # ── Service Registry ──────────────────────────────────────────────────────────
 SERVICE_REGISTRY = {
-    "products":  "http://localhost:8001",
-    "customers": "http://localhost:8002",
-    "orders":    "http://localhost:8003",
-    "payments":  "http://localhost:8004",
-    "cart":      "http://localhost:8005",
+    "products":      "http://localhost:8001",
+    "customers":     "http://localhost:8002",
+    "orders":        "http://localhost:8003",
+    "payments":      "http://localhost:8004",
+    "notifications": "http://localhost:8005",
 }
 
 # ── Health Check ──────────────────────────────────────────────────────────────
