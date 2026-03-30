@@ -1,139 +1,187 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 import httpx
-import uvicorn
 
 app = FastAPI(
-    title="API Gateway",
-    description="""
-## E-Commerce Microservices API Gateway
-
-The API Gateway is the **single entry point** for all client requests.  
-Instead of calling each microservice on different ports, clients call the Gateway on **port 8000**.
-
-### Routing Table
-
-| Route Prefix             | Forwards To              | Port |
-|--------------------------|--------------------------|------|
-| `/api/products/**`           | Product Service          | 8001 |
-| `/api/customers/**`          | Customer Service         | 8002 |
-| `/api/orders/**`             | Order Service            | 8003 |
-| `/api/payments/**`           | Payment Service          | 8004 |
-| `/api/notifications/**`      | Notification Service     | 8005 |
-    """,
-    version="1.0.0",
+    title="E-Commerce API Gateway",
+    description="Single entry point for all microservices — routes to Product(8001), Customer(8002), Order(8003), Payment(8004)",
+    version="1.0.0"
 )
 
-# ── CORS ─────────────────────────────────────────────────────────────────────
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Service Registry ──────────────────────────────────────────────────────────
-SERVICE_REGISTRY = {
-    "products":      "http://localhost:8001",
-    "customers":     "http://localhost:8002",
-    "orders":        "http://localhost:8003",
-    "payments":      "http://localhost:8004",
-    "notifications": "http://localhost:8005",
+SERVICES = {
+    "product":  "http://localhost:8001",
+    "customer": "http://localhost:8002",
+    "order":    "http://localhost:8003",
+    "payment":  "http://localhost:8004",
 }
 
-# ── Health Check ──────────────────────────────────────────────────────────────
+async def forward_request(service_url: str, path: str, method: str, body: dict = None):
+    url = f"{service_url}{path}"
+    async with httpx.AsyncClient() as client:
+        try:
+            if method == "GET":
+                response = await client.get(url)
+            elif method == "POST":
+                response = await client.post(url, json=body)
+            elif method == "PUT":
+                response = await client.put(url, json=body)
+            elif method == "PATCH":
+                response = await client.patch(url, json=body)
+            elif method == "DELETE":
+                response = await client.delete(url)
+            return response.json(), response.status_code
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
+
+# ── GATEWAY ROOT ─────────────────────────────────
 @app.get("/", tags=["Gateway"])
-def root():
+def gateway_root():
     return {
         "service": "API Gateway",
         "status": "running",
         "port": 8000,
-        "registered_services": list(SERVICE_REGISTRY.keys()),
+        "routes": {
+            "products":  "/gateway/products",
+            "customers": "/gateway/customers",
+            "orders":    "/gateway/orders",
+            "payments":  "/gateway/payments"
+        }
     }
 
-@app.get("/health", tags=["Gateway"])
-async def health_check():
-    """Check health status of all microservices"""
-    statuses = {}
-    async with httpx.AsyncClient(timeout=3.0) as client:
-        for name, base_url in SERVICE_REGISTRY.items():
-            try:
-                resp = await client.get(f"{base_url}/")
-                statuses[name] = "UP" if resp.status_code == 200 else "DEGRADED"
-            except Exception:
-                statuses[name] = "DOWN"
-    return {"gateway": "UP", "services": statuses}
+# ── PRODUCT ROUTES (→ Port 8001) ─────────────────
+@app.get("/gateway/products", tags=["Product Gateway"])
+async def get_products():
+    """[Gateway → 8001] Get all products"""
+    data, status = await forward_request(SERVICES["product"], "/products", "GET")
+    return JSONResponse(content=data, status_code=status)
 
-# ── Dynamic Proxy Route ───────────────────────────────────────────────────────
-@app.api_route(
-    "/api/{service}/{path:path}",
-    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    tags=["Proxy"],
-    summary="Dynamic proxy to microservices",
-    description="Routes any request to the correct microservice based on the service name in the URL."
-)
-async def gateway_proxy(service: str, path: str, request: Request):
-    """
-    **Dynamic proxy** — forwards requests to the correct microservice.
+@app.get("/gateway/products/{product_id}", tags=["Product Gateway"])
+async def get_product(product_id: int):
+    """[Gateway → 8001] Get product by ID"""
+    data, status = await forward_request(SERVICES["product"], f"/products/{product_id}", "GET")
+    return JSONResponse(content=data, status_code=status)
 
-    - `service` = one of: `products`, `customers`, `orders`, `payments`, `cart`
-    - `path` = the rest of the original service URL
+@app.post("/gateway/products", tags=["Product Gateway"])
+async def create_product(request: Request):
+    """[Gateway → 8001] Create a product"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["product"], "/products", "POST", body)
+    return JSONResponse(content=data, status_code=status)
 
-    **Example:**  
-    `GET /api/products/products/1` → forwards to `http://localhost:8001/products/1`
-    """
-    if service not in SERVICE_REGISTRY:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Service '{service}' not found. Available: {list(SERVICE_REGISTRY.keys())}"
-        )
+@app.put("/gateway/products/{product_id}", tags=["Product Gateway"])
+async def update_product(product_id: int, request: Request):
+    """[Gateway → 8001] Update a product"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["product"], f"/products/{product_id}", "PUT", body)
+    return JSONResponse(content=data, status_code=status)
 
-    base_url = SERVICE_REGISTRY[service]
-    target_url = f"{base_url}/{path}"
+@app.delete("/gateway/products/{product_id}", tags=["Product Gateway"])
+async def delete_product(product_id: int):
+    """[Gateway → 8001] Delete a product"""
+    data, status = await forward_request(SERVICES["product"], f"/products/{product_id}", "DELETE")
+    return JSONResponse(content=data, status_code=status)
 
-    # Forward query params
-    query_string = str(request.url.query)
-    if query_string:
-        target_url = f"{target_url}?{query_string}"
+# ── CUSTOMER ROUTES (→ Port 8002) ────────────────
+@app.get("/gateway/customers", tags=["Customer Gateway"])
+async def get_customers():
+    """[Gateway → 8002] Get all customers"""
+    data, status = await forward_request(SERVICES["customer"], "/customers", "GET")
+    return JSONResponse(content=data, status_code=status)
 
-    body = await request.body()
+@app.get("/gateway/customers/{customer_id}", tags=["Customer Gateway"])
+async def get_customer(customer_id: int):
+    """[Gateway → 8002] Get customer by ID"""
+    data, status = await forward_request(SERVICES["customer"], f"/customers/{customer_id}", "GET")
+    return JSONResponse(content=data, status_code=status)
 
-    # Strip hop-by-hop headers
-    forward_headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in ("host", "content-length", "transfer-encoding")
-    }
+@app.post("/gateway/customers", tags=["Customer Gateway"])
+async def create_customer(request: Request):
+    """[Gateway → 8002] Register a customer"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["customer"], "/customers", "POST", body)
+    return JSONResponse(content=data, status_code=status)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.request(
-                method=request.method,
-                url=target_url,
-                headers=forward_headers,
-                content=body,
-            )
-            try:
-                return JSONResponse(
-                    content=response.json(),
-                    status_code=response.status_code
-                )
-            except Exception:
-                return JSONResponse(
-                    content={"raw": response.text},
-                    status_code=response.status_code
-                )
-        except httpx.ConnectError:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Service '{service}' is unavailable. Is it running on {base_url}?"
-            )
-        except httpx.TimeoutException:
-            raise HTTPException(
-                status_code=504,
-                detail=f"Service '{service}' timed out."
-            )
+@app.put("/gateway/customers/{customer_id}", tags=["Customer Gateway"])
+async def update_customer(customer_id: int, request: Request):
+    """[Gateway → 8002] Update customer"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["customer"], f"/customers/{customer_id}", "PUT", body)
+    return JSONResponse(content=data, status_code=status)
 
+@app.delete("/gateway/customers/{customer_id}", tags=["Customer Gateway"])
+async def delete_customer(customer_id: int):
+    """[Gateway → 8002] Delete customer"""
+    data, status = await forward_request(SERVICES["customer"], f"/customers/{customer_id}", "DELETE")
+    return JSONResponse(content=data, status_code=status)
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+# ── ORDER ROUTES (→ Port 8003) ───────────────────
+@app.get("/gateway/orders", tags=["Order Gateway"])
+async def get_orders():
+    """[Gateway → 8003] Get all orders"""
+    data, status = await forward_request(SERVICES["order"], "/orders", "GET")
+    return JSONResponse(content=data, status_code=status)
+
+@app.get("/gateway/orders/{order_id}", tags=["Order Gateway"])
+async def get_order(order_id: int):
+    """[Gateway → 8003] Get order by ID"""
+    data, status = await forward_request(SERVICES["order"], f"/orders/{order_id}", "GET")
+    return JSONResponse(content=data, status_code=status)
+
+@app.post("/gateway/orders", tags=["Order Gateway"])
+async def create_order(request: Request):
+    """[Gateway → 8003] Place an order"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["order"], "/orders", "POST", body)
+    return JSONResponse(content=data, status_code=status)
+
+@app.patch("/gateway/orders/{order_id}/status", tags=["Order Gateway"])
+async def update_order_status(order_id: int, request: Request):
+    """[Gateway → 8003] Update order status"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["order"], f"/orders/{order_id}/status", "PATCH", body)
+    return JSONResponse(content=data, status_code=status)
+
+@app.delete("/gateway/orders/{order_id}", tags=["Order Gateway"])
+async def cancel_order(order_id: int):
+    """[Gateway → 8003] Cancel an order"""
+    data, status = await forward_request(SERVICES["order"], f"/orders/{order_id}", "DELETE")
+    return JSONResponse(content=data, status_code=status)
+
+# ── PAYMENT ROUTES (→ Port 8004) ─────────────────
+@app.get("/gateway/payments", tags=["Payment Gateway"])
+async def get_payments():
+    """[Gateway → 8004] Get all payments"""
+    data, status = await forward_request(SERVICES["payment"], "/payments", "GET")
+    return JSONResponse(content=data, status_code=status)
+
+@app.get("/gateway/payments/{payment_id}", tags=["Payment Gateway"])
+async def get_payment(payment_id: int):
+    """[Gateway → 8004] Get payment by ID"""
+    data, status = await forward_request(SERVICES["payment"], f"/payments/{payment_id}", "GET")
+    return JSONResponse(content=data, status_code=status)
+
+@app.get("/gateway/payments/order/{order_id}", tags=["Payment Gateway"])
+async def get_payment_by_order(order_id: int):
+    """[Gateway → 8004] Get payment by order ID"""
+    data, status = await forward_request(SERVICES["payment"], f"/payments/order/{order_id}", "GET")
+    return JSONResponse(content=data, status_code=status)
+
+@app.post("/gateway/payments", tags=["Payment Gateway"])
+async def create_payment(request: Request):
+    """[Gateway → 8004] Process a payment"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["payment"], "/payments", "POST", body)
+    return JSONResponse(content=data, status_code=status)
+
+@app.patch("/gateway/payments/{payment_id}/status", tags=["Payment Gateway"])
+async def update_payment_status(payment_id: int, request: Request):
+    """[Gateway → 8004] Update payment status"""
+    body = await request.json()
+    data, status = await forward_request(SERVICES["payment"], f"/payments/{payment_id}/status", "PATCH", body)
+    return JSONResponse(content=data, status_code=status)
+
+@app.delete("/gateway/payments/{payment_id}", tags=["Payment Gateway"])
+async def delete_payment(payment_id: int):
+    """[Gateway → 8004] Delete a payment"""
+    data, status = await forward_request(SERVICES["payment"], f"/payments/{payment_id}", "DELETE")
+    return JSONResponse(content=data, status_code=status)

@@ -1,79 +1,72 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-import uvicorn
+from typing import Optional
 
 app = FastAPI(
     title="Product Service",
-    description="Microservice for managing products in the E-Commerce platform",
-    version="1.0.0",
-    docs_url="/docs",
-    openapi_url="/openapi.json"
+    description="Manages products in the e-commerce platform",
+    version="1.0.0"
 )
 
-# ── Models ──────────────────────────────────────────────────────────────────
+products_db = [
+    {"id": 1, "name": "Laptop", "price": 999.99, "stock": 10, "category": "Electronics"},
+    {"id": 2, "name": "T-Shirt", "price": 19.99, "stock": 50, "category": "Clothing"},
+    {"id": 3, "name": "Headphones", "price": 149.99, "stock": 25, "category": "Electronics"},
+]
+
 class Product(BaseModel):
-    id: Optional[int] = None
     name: str
-    description: str
     price: float
     stock: int
     category: str
 
-# ── In-memory database ───────────────────────────────────────────────────────
-products_db: List[Product] = [
-    Product(id=1, name="Laptop Pro", description="High-performance laptop", price=1200.00, stock=50, category="Electronics"),
-    Product(id=2, name="Wireless Mouse", description="Ergonomic wireless mouse", price=25.99, stock=200, category="Accessories"),
-    Product(id=3, name="USB-C Hub", description="7-in-1 USB-C hub", price=45.00, stock=150, category="Accessories"),
-]
-counter = 4
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    stock: Optional[int] = None
+    category: Optional[str] = None
 
-# ── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/", tags=["Health"])
 def root():
     return {"service": "Product Service", "status": "running", "port": 8001}
 
-@app.get("/products", response_model=List[Product], tags=["Products"])
+@app.get("/products", tags=["Products"])
 def get_all_products():
-    """Retrieve all products"""
-    return products_db
+    """Get all products"""
+    return {"products": products_db, "total": len(products_db)}
 
-@app.get("/products/{product_id}", response_model=Product, tags=["Products"])
+@app.get("/products/{product_id}", tags=["Products"])
 def get_product(product_id: int):
-    """Retrieve a specific product by ID"""
-    product = next((p for p in products_db if p.id == product_id), None)
+    """Get a single product by ID"""
+    product = next((p for p in products_db if p["id"] == product_id), None)
     if not product:
-        raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
+        raise HTTPException(status_code=404, detail="Product not found")
     return product
 
-@app.post("/products", response_model=Product, status_code=201, tags=["Products"])
+@app.post("/products", tags=["Products"], status_code=201)
 def create_product(product: Product):
     """Create a new product"""
-    global counter
-    product.id = counter
-    counter += 1
-    products_db.append(product)
-    return product
+    new_id = max(p["id"] for p in products_db) + 1
+    new_product = {"id": new_id, **product.dict()}
+    products_db.append(new_product)
+    return {"message": "Product created successfully", "product": new_product}
 
-@app.put("/products/{product_id}", response_model=Product, tags=["Products"])
-def update_product(product_id: int, updated_product: Product):
+@app.put("/products/{product_id}", tags=["Products"])
+def update_product(product_id: int, update: ProductUpdate):
     """Update an existing product"""
-    for i, p in enumerate(products_db):
-        if p.id == product_id:
-            updated_product.id = product_id
-            products_db[i] = updated_product
-            return updated_product
-    raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
+    product = next((p for p in products_db if p["id"] == product_id), None)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    for key, value in update.dict(exclude_none=True).items():
+        product[key] = value
+    return {"message": "Product updated", "product": product}
 
 @app.delete("/products/{product_id}", tags=["Products"])
 def delete_product(product_id: int):
-    """Delete a product by ID"""
+    """Delete a product"""
     global products_db
-    product = next((p for p in products_db if p.id == product_id), None)
+    product = next((p for p in products_db if p["id"] == product_id), None)
     if not product:
-        raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
-    products_db = [p for p in products_db if p.id != product_id]
-    return {"message": f"Product {product_id} deleted successfully"}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+        raise HTTPException(status_code=404, detail="Product not found")
+    products_db = [p for p in products_db if p["id"] != product_id]
+    return {"message": "Product deleted successfully"}

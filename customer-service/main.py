@@ -1,83 +1,74 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-import uvicorn
+from typing import Optional
 
 app = FastAPI(
     title="Customer Service",
-    description="Microservice for managing customers in the E-Commerce platform",
-    version="1.0.0",
-    docs_url="/docs",
-    openapi_url="/openapi.json"
+    description="Manages customers in the e-commerce platform",
+    version="1.0.0"
 )
 
-# ── Models ──────────────────────────────────────────────────────────────────
+customers_db = [
+    {"id": 1, "name": "Alice Johnson", "email": "alice@email.com", "phone": "0771234567", "address": "Colombo 03"},
+    {"id": 2, "name": "Bob Silva", "email": "bob@email.com", "phone": "0777654321", "address": "Kandy"},
+    {"id": 3, "name": "Carol Fernando", "email": "carol@email.com", "phone": "0779876543", "address": "Galle"},
+]
+
 class Customer(BaseModel):
-    id: Optional[int] = None
-    first_name: str
-    last_name: str
+    name: str
     email: str
     phone: str
     address: str
-    city: str
 
-# ── In-memory database ───────────────────────────────────────────────────────
-customers_db: List[Customer] = [
-    Customer(id=1, first_name="Amal", last_name="Perera", email="amal@email.com", phone="0771234567", address="123 Galle Rd", city="Colombo"),
-    Customer(id=2, first_name="Nimal", last_name="Silva", email="nimal@email.com", phone="0777654321", address="45 Kandy Rd", city="Kandy"),
-]
-counter = 3
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
 
-# ── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/", tags=["Health"])
 def root():
     return {"service": "Customer Service", "status": "running", "port": 8002}
 
-@app.get("/customers", response_model=List[Customer], tags=["Customers"])
+@app.get("/customers", tags=["Customers"])
 def get_all_customers():
-    """Retrieve all customers"""
-    return customers_db
+    """Get all customers"""
+    return {"customers": customers_db, "total": len(customers_db)}
 
-@app.get("/customers/{customer_id}", response_model=Customer, tags=["Customers"])
+@app.get("/customers/{customer_id}", tags=["Customers"])
 def get_customer(customer_id: int):
-    """Retrieve a specific customer by ID"""
-    customer = next((c for c in customers_db if c.id == customer_id), None)
+    """Get a single customer by ID"""
+    customer = next((c for c in customers_db if c["id"] == customer_id), None)
     if not customer:
-        raise HTTPException(status_code=404, detail=f"Customer with ID {customer_id} not found")
+        raise HTTPException(status_code=404, detail="Customer not found")
     return customer
 
-@app.post("/customers", response_model=Customer, status_code=201, tags=["Customers"])
+@app.post("/customers", tags=["Customers"], status_code=201)
 def create_customer(customer: Customer):
     """Register a new customer"""
-    global counter
-    # Check for duplicate email
-    existing = next((c for c in customers_db if c.email == customer.email), None)
-    if existing:
-        raise HTTPException(status_code=400, detail="Customer with this email already exists")
-    customer.id = counter
-    counter += 1
-    customers_db.append(customer)
-    return customer
+    if any(c["email"] == customer.email for c in customers_db):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    new_id = max(c["id"] for c in customers_db) + 1
+    new_customer = {"id": new_id, **customer.dict()}
+    customers_db.append(new_customer)
+    return {"message": "Customer registered successfully", "customer": new_customer}
 
-@app.put("/customers/{customer_id}", response_model=Customer, tags=["Customers"])
-def update_customer(customer_id: int, updated_customer: Customer):
+@app.put("/customers/{customer_id}", tags=["Customers"])
+def update_customer(customer_id: int, update: CustomerUpdate):
     """Update customer details"""
-    for i, c in enumerate(customers_db):
-        if c.id == customer_id:
-            updated_customer.id = customer_id
-            customers_db[i] = updated_customer
-            return updated_customer
-    raise HTTPException(status_code=404, detail=f"Customer with ID {customer_id} not found")
+    customer = next((c for c in customers_db if c["id"] == customer_id), None)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    for key, value in update.dict(exclude_none=True).items():
+        customer[key] = value
+    return {"message": "Customer updated", "customer": customer}
 
 @app.delete("/customers/{customer_id}", tags=["Customers"])
 def delete_customer(customer_id: int):
-    """Delete a customer by ID"""
+    """Delete a customer"""
     global customers_db
-    customer = next((c for c in customers_db if c.id == customer_id), None)
+    customer = next((c for c in customers_db if c["id"] == customer_id), None)
     if not customer:
-        raise HTTPException(status_code=404, detail=f"Customer with ID {customer_id} not found")
-    customers_db = [c for c in customers_db if c.id != customer_id]
-    return {"message": f"Customer {customer_id} deleted successfully"}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+        raise HTTPException(status_code=404, detail="Customer not found")
+    customers_db = [c for c in customers_db if c["id"] != customer_id]
+    return {"message": "Customer deleted successfully"}
